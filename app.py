@@ -201,6 +201,7 @@ def get_stale_plex_items(cfg, library_key, stale_days, kind):
             "lastViewedAt": last_viewed,
             "file": file_path,
             "size": size,
+            "ratingKey": item.get("ratingKey"),
             "tmdb_id": tmdb_id,
             "tvdb_id": tvdb_id,
         })
@@ -223,6 +224,23 @@ def delete_arr_item(base_url, api_key, endpoint, item_id):
         method="DELETE",
     )
     urllib.request.urlopen(req, timeout=30)
+
+
+def delete_plex_item(cfg, rating_key):
+    """Delete the item directly from Plex's own index rather than waiting on a
+    library scan to notice the file is gone. Plex holds missing files in a
+    grace period before purging them (protects against a drive that's
+    temporarily offline looking like mass deletion), so a scan-based refresh
+    can leave a stale/ghost entry for a while. A direct delete is instant and
+    reliable regardless of that grace period or whether real-time file
+    watching is enabled."""
+    if not rating_key:
+        return
+    req = urllib.request.Request(
+        f"{cfg['plex_url']}/library/metadata/{rating_key}?X-Plex-Token={cfg['plex_token']}",
+        method="DELETE",
+    )
+    urllib.request.urlopen(req, timeout=15)
 
 
 def has_keep_tag(arr_item, all_tags, keep_tag):
@@ -319,6 +337,12 @@ def evict_stale(cfg, kind, evictions_left):
             except Exception as e:
                 log(f"ERROR deleting '{candidate['title']}': {e}")
                 continue
+            try:
+                delete_plex_item(cfg, candidate.get("ratingKey"))
+            except Exception as e:
+                log(f"WARNING: deleted from {endpoint} but couldn't clean up Plex's index for "
+                    f"'{candidate['title']}' ({e}) -- it may show as a ghost entry until Plex's "
+                    f"next scan catches up")
 
         add_history({"title": candidate["title"], "kind": kind, "watched_days_ago": watched_days_ago,
                      "size_gb": round(candidate["size"] / 1024**3, 2), "dry_run": cfg["dry_run"]})
