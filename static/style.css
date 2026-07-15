@@ -53,7 +53,7 @@ label {
   font-size: 0.9rem;
   color: var(--muted);
 }
-label input[type=text], label input[type=number] {
+label input[type=text], label input[type=number], label input[type=password] {
   display: block;
   width: 100%;
   margin-top: 0.3rem;
@@ -64,6 +64,23 @@ label input[type=text], label input[type=number] {
   color: var(--text);
   font-size: 0.95rem;
 }
+.secret-field {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+.secret-field input { margin-top: 0; flex: 1; }
+.secret-field .reveal {
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 0.8rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.secret-field .reveal:hover { color: var(--text); }
 label.checkbox { display: flex; align-items: center; gap: 0.5rem; }
 label.checkbox input { width: auto; }
 button {

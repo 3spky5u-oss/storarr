@@ -7,13 +7,16 @@
 # Overseerr/Jellyseerr looks like a brand new request, not a re-add.
 #
 # Usage:
-#   1. docker build -t storarr:latest .
-#   2. Adjust the volume mount below so /data-storage points at the SAME
+#   1. Adjust the volume mount below so /data-storage points at the SAME
 #      host path your Radarr/Sonarr containers use for the media library
 #      (read-only is fine, Storarr only needs to measure usage there —
 #      actual deletions go through the Radarr/Sonarr APIs, not the filesystem).
-#   3. docker compose up -d
-#   4. Open http://<host>:8585/settings and fill in your Plex token,
+#      Multiple separate disks (JBOD/Unraid-array-without-union-fs)? Mount
+#      each one and list them comma-separated in the app's Storage Path
+#      setting -- see the README.
+#   2. docker compose up -d   (builds the image automatically, no separate
+#      build step needed)
+#   3. Open http://<host>:8585/settings and fill in your Plex token,
 #      Radarr/Sonarr URLs + API keys, and your thresholds.
 #
 # Note: if your Plex container uses network_mode: host, other containers
@@ -31,3 +34,4 @@ services:
     volumes:
       - ./data:/data
       - /path/to/your/media:/data-storage:ro
+      # - /path/to/disk2:/data-storage2:ro   # example second mount for JBOD setups

@@ -18,6 +18,6 @@
   <main>
     {% block content %}{% endblock %}
   </main>
-  <footer>Storarr — disk-pressure-aware library rollover</footer>
+  <footer>Storarr{% if version %} v{{ version }}{% endif %} — disk-pressure-aware library rollover</footer>
 </body>
 </html>

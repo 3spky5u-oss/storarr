@@ -6,15 +6,26 @@
 <form method="post" class="card">
   <h2>Plex</h2>
   <label>Plex URL <input type="text" name="plex_url" value="{{ cfg.plex_url }}"></label>
-  <label>Plex Token <input type="text" name="plex_token" value="{{ cfg.plex_token }}" placeholder="X-Plex-Token"></label>
+  <label>Plex Token
+    <span class="secret-field">
+      <input type="password" name="plex_token" value="{{ cfg.plex_token }}" placeholder="X-Plex-Token">
+      <button type="button" class="reveal">show</button>
+    </span>
+  </label>
   <label>Movies Library Key <input type="text" name="movies_library_key" value="{{ cfg.movies_library_key }}"></label>
 
   <h2>Radarr</h2>
   <label>Radarr URL <input type="text" name="radarr_url" value="{{ cfg.radarr_url }}"></label>
-  <label>Radarr API Key <input type="text" name="radarr_api_key" value="{{ cfg.radarr_api_key }}"></label>
+  <label>Radarr API Key
+    <span class="secret-field">
+      <input type="password" name="radarr_api_key" value="{{ cfg.radarr_api_key }}">
+      <button type="button" class="reveal">show</button>
+    </span>
+  </label>
 
   <h2>Storage</h2>
-  <label>Storage path (as seen inside this container) <input type="text" name="storage_path" value="{{ cfg.storage_path }}"></label>
+  <label>Storage path(s) (as seen inside this container) — comma-separated if you have multiple drives/mounts to treat as one pool
+    <input type="text" name="storage_path" value="{{ cfg.storage_path }}" placeholder="/data-storage or /disk1,/disk2,/disk3"></label>
   <label>Roll-off trigger — disk used (GB) <input type="number" name="disk_threshold_gb" value="{{ cfg.disk_threshold_gb }}"></label>
   <label>Minimum free space to always keep (GB) — rollover also triggers if free space drops below this
     <input type="number" name="min_free_gb" value="{{ cfg.min_free_gb }}"></label>
@@ -32,9 +43,40 @@
   <label class="checkbox"><input type="checkbox" name="tv_enabled" {{ "checked" if cfg.tv_enabled }}> Also roll off stale shows</label>
   <label>Shows Library Key <input type="text" name="shows_library_key" value="{{ cfg.shows_library_key }}"></label>
   <label>Sonarr URL <input type="text" name="sonarr_url" value="{{ cfg.sonarr_url }}"></label>
-  <label>Sonarr API Key <input type="text" name="sonarr_api_key" value="{{ cfg.sonarr_api_key }}"></label>
+  <label>Sonarr API Key
+    <span class="secret-field">
+      <input type="password" name="sonarr_api_key" value="{{ cfg.sonarr_api_key }}">
+      <button type="button" class="reveal">show</button>
+    </span>
+  </label>
   <label>Stale after (days since last episode watched) <input type="number" name="tv_stale_days" value="{{ cfg.tv_stale_days }}"></label>
+
+  <h2>Security</h2>
+  <p class="muted">
+    {% if auth_enabled %}Password protection is <strong>ON</strong> — this page and the dashboard require login.
+    {% else %}Password protection is <strong>off</strong> — anyone who can reach this port can see your API keys and trigger deletions. Set a password if this is reachable beyond your own LAN.{% endif %}
+  </p>
+  <label>{{ "Change" if auth_enabled else "Set" }} admin password (leave blank to keep current)
+    <span class="secret-field">
+      <input type="password" name="admin_password" autocomplete="new-password">
+      <button type="button" class="reveal">show</button>
+    </span>
+  </label>
+  {% if auth_enabled %}
+  <label class="checkbox"><input type="checkbox" name="clear_password"> Remove password protection</label>
+  {% endif %}
 
   <button type="submit">Save</button>
 </form>
+
+<script>
+document.querySelectorAll('.reveal').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const input = btn.previousElementSibling;
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    btn.textContent = showing ? 'show' : 'hide';
+  });
+});
+</script>
 {% endblock %}

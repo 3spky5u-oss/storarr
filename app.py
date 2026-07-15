@@ -6,10 +6,14 @@ import time
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime
+from functools import wraps
 
-from flask import Flask, render_template, request, redirect, url_for, jsonify
+from flask import Flask, render_template, request, redirect, url_for, jsonify, Response
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
+
+VERSION = "1.0.0"
 
 DATA_DIR = os.environ.get("STORARR_DATA_DIR", "/data")
 CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
@@ -37,9 +41,12 @@ DEFAULT_CONFIG = {
     "sonarr_api_key": "",
     "shows_library_key": "2",
     "tv_stale_days": 365,
+    # optional HTTP basic auth -- off unless a password has been set
+    "admin_password_hash": "",
 }
 
 _lock = threading.Lock()
+_state = {"last_check": None}
 
 
 def load_config():
@@ -83,19 +90,56 @@ def log(msg):
         f.write(line + "\n")
 
 
-def disk_used_bytes(path):
-    return shutil.disk_usage(path).used
+# ---------------------------------------------------------------- auth ----
+
+def require_auth(f):
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        cfg = load_config()
+        if not cfg.get("admin_password_hash"):
+            return f(*args, **kwargs)
+        auth = request.authorization
+        if not auth or not check_password_hash(cfg["admin_password_hash"], auth.password):
+            return Response(
+                "Authentication required", 401,
+                {"WWW-Authenticate": 'Basic realm="Storarr"'}
+            )
+        return f(*args, **kwargs)
+    return wrapped
 
 
-def disk_total_bytes(path):
-    return shutil.disk_usage(path).total
+# ------------------------------------------------------------- storage ----
+
+def storage_paths(cfg):
+    """storage_path can be a single mount or a comma-separated list -- lets
+    JBOD/multi-disk setups (e.g. an Unraid-style array without a union
+    filesystem) monitor several mounts as one combined pool. A single RAID/
+    LVM/ZFS mount just becomes a one-item list, no special-casing needed."""
+    return [p.strip() for p in cfg["storage_path"].split(",") if p.strip()]
+
+
+def paths_exist(cfg):
+    paths = storage_paths(cfg)
+    return bool(paths) and all(os.path.exists(p) for p in paths)
+
+
+def disk_used_bytes(cfg):
+    return sum(shutil.disk_usage(p).used for p in storage_paths(cfg))
+
+
+def disk_total_bytes(cfg):
+    return sum(shutil.disk_usage(p).total for p in storage_paths(cfg))
+
+
+def disk_free_bytes(cfg):
+    return sum(shutil.disk_usage(p).free for p in storage_paths(cfg))
 
 
 def over_limit(cfg):
-    """True if either the used-space threshold or the min-free-space floor is breached."""
-    usage = shutil.disk_usage(cfg["storage_path"])
-    over_used = usage.used >= cfg["disk_threshold_gb"] * 1024**3
-    under_free = usage.free <= cfg["min_free_gb"] * 1024**3
+    """True if either the used-space threshold or the min-free-space floor is breached,
+    summed across all configured storage paths."""
+    over_used = disk_used_bytes(cfg) >= cfg["disk_threshold_gb"] * 1024**3
+    under_free = disk_free_bytes(cfg) <= cfg["min_free_gb"] * 1024**3
     return over_used or under_free
 
 
@@ -103,10 +147,15 @@ def total_freed_gb():
     return round(sum(h.get("size_gb", 0) for h in load_history() if not h.get("dry_run")), 1)
 
 
+# ----------------------------------------------------------------- Plex ---
+
 def get_stale_plex_items(cfg, library_key, stale_days, kind):
     """kind: 'movie' -> top-level Video items. 'show' -> Directory items (shows),
-    using their aggregate lastViewedAt/viewedLeafCount."""
-    url = f"{cfg['plex_url']}/library/sections/{library_key}/all?X-Plex-Token={cfg['plex_token']}"
+    using their aggregate lastViewedAt/viewedLeafCount. Pulls external GUIDs
+    (tmdb/tvdb) when available so eviction can match Radarr/Sonarr by ID
+    rather than by fragile file-path/title comparison."""
+    url = (f"{cfg['plex_url']}/library/sections/{library_key}/all"
+           f"?includeGuids=1&X-Plex-Token={cfg['plex_token']}")
     with urllib.request.urlopen(url, timeout=30) as resp:
         root = ET.fromstring(resp.read())
 
@@ -127,6 +176,14 @@ def get_stale_plex_items(cfg, library_key, stale_days, kind):
         if last_viewed > cutoff:
             continue
 
+        tmdb_id, tvdb_id = None, None
+        for guid in item.findall("Guid"):
+            gid = guid.get("id", "")
+            if gid.startswith("tmdb://"):
+                tmdb_id = gid.split("://", 1)[1]
+            elif gid.startswith("tvdb://"):
+                tvdb_id = gid.split("://", 1)[1]
+
         file_path = None
         size = 0
         if kind == "movie":
@@ -136,17 +193,21 @@ def get_stale_plex_items(cfg, library_key, stale_days, kind):
                 if part is not None:
                     file_path = part.get("file")
                     size = int(part.get("size") or 0)
-            if not file_path:
-                continue
+            if not file_path and not tmdb_id:
+                continue  # nothing usable to match this item against Radarr
         candidates.append({
             "title": item.get("title"),
             "lastViewedAt": last_viewed,
             "file": file_path,
             "size": size,
+            "tmdb_id": tmdb_id,
+            "tvdb_id": tvdb_id,
         })
     candidates.sort(key=lambda c: c["lastViewedAt"])
     return candidates
 
+
+# --------------------------------------------------------- Radarr/Sonarr --
 
 def get_arr_items(base_url, api_key, endpoint):
     req = urllib.request.Request(f"{base_url}/api/v3/{endpoint}", headers={"X-Api-Key": api_key})
@@ -176,18 +237,36 @@ def has_keep_tag(arr_item, all_tags, keep_tag):
     return tag_id in (arr_item.get("tags") or [])
 
 
+def match_arr_item(candidate, kind, arr_items, by_id, by_path):
+    """ID match first (robust, works regardless of mount/folder layout),
+    falls back to path (movies) or title (shows) for older Plex agents
+    that don't expose external GUIDs."""
+    if kind == "movie" and candidate.get("tmdb_id"):
+        item = by_id.get(candidate["tmdb_id"])
+        if item:
+            return item
+    if kind == "show" and candidate.get("tvdb_id"):
+        item = by_id.get(candidate["tvdb_id"])
+        if item:
+            return item
+
+    if kind == "movie" and candidate.get("file"):
+        return by_path.get(os.path.normpath(candidate["file"]))
+    if kind == "show":
+        return next((m for m in arr_items if m.get("title") == candidate["title"]), None)
+    return None
+
+
 def evict_stale(cfg, kind, evictions_left):
     """Returns (evicted_titles, evictions_left_remaining)."""
     if kind == "movie":
         library_key = cfg["movies_library_key"]
         stale_days = cfg["stale_days"]
         arr_url, arr_key, endpoint = cfg["radarr_url"], cfg["radarr_api_key"], "movie"
-        file_field = "path"
     else:
         library_key = cfg["shows_library_key"]
         stale_days = cfg["tv_stale_days"]
         arr_url, arr_key, endpoint = cfg["sonarr_url"], cfg["sonarr_api_key"], "series"
-        file_field = "path"
 
     stale = get_stale_plex_items(cfg, library_key, stale_days, kind)
     if not stale:
@@ -196,12 +275,17 @@ def evict_stale(cfg, kind, evictions_left):
     arr_items = get_arr_items(arr_url, arr_key, endpoint)
     all_tags = get_arr_items(arr_url, arr_key, "tag")
 
+    by_id = {}
     by_path = {}
     for m in arr_items:
         if kind == "movie":
+            if m.get("tmdbId"):
+                by_id[str(m["tmdbId"])] = m
             mf = m.get("movieFile")
             p = mf.get("path") if mf else None
         else:
+            if m.get("tvdbId"):
+                by_id[str(m["tvdbId"])] = m
             p = m.get("path")  # series root folder
         if p:
             by_path[os.path.normpath(p)] = m
@@ -213,15 +297,9 @@ def evict_stale(cfg, kind, evictions_left):
         if not over_limit(cfg):
             break
 
-        if kind == "movie":
-            norm = os.path.normpath(candidate["file"])
-            item = by_path.get(norm)
-        else:
-            # match show by title against series root folder name, best-effort
-            item = next((m for m in arr_items if m.get("title") == candidate["title"]), None)
-
+        item = match_arr_item(candidate, kind, arr_items, by_id, by_path)
         if not item:
-            log(f"WARNING: no {endpoint} match for '{candidate['title']}'")
+            log(f"WARNING: no {endpoint} match for '{candidate['title']}' (checked ID and path/title)")
             continue
 
         if has_keep_tag(item, all_tags, cfg["keep_tag"]):
@@ -233,7 +311,11 @@ def evict_stale(cfg, kind, evictions_left):
             log(f"[DRY RUN] Would evict {kind} '{candidate['title']}' (watched {watched_days_ago}d ago)")
         else:
             log(f"Evicting {kind} '{candidate['title']}' (watched {watched_days_ago}d ago)")
-            delete_arr_item(arr_url, arr_key, endpoint, item["id"])
+            try:
+                delete_arr_item(arr_url, arr_key, endpoint, item["id"])
+            except Exception as e:
+                log(f"ERROR deleting '{candidate['title']}': {e}")
+                continue
 
         add_history({"title": candidate["title"], "kind": kind, "watched_days_ago": watched_days_ago,
                      "size_gb": round(candidate["size"] / 1024**3, 2), "dry_run": cfg["dry_run"]})
@@ -249,9 +331,12 @@ def run_check(manual=False):
         return {"ran": False, "reason": "disabled"}
     if not cfg["plex_token"] or not cfg["radarr_api_key"]:
         return {"ran": False, "reason": "not configured"}
+    if not paths_exist(cfg):
+        return {"ran": False, "reason": f"storage path(s) not found: {cfg['storage_path']}"}
 
     with _lock:
-        used_gb = disk_used_bytes(cfg["storage_path"]) / 1024**3
+        used_gb = disk_used_bytes(cfg) / 1024**3
+        _state["last_check"] = datetime.now().isoformat(timespec="seconds")
 
         if not over_limit(cfg) and not manual:
             return {"ran": True, "action": "none", "used_gb": round(used_gb, 1)}
@@ -261,6 +346,7 @@ def run_check(manual=False):
             try:
                 stale = get_stale_plex_items(cfg, cfg["movies_library_key"], cfg["stale_days"], "movie")
             except Exception as e:
+                log(f"ERROR fetching Plex data: {e}")
                 return {"ran": True, "action": "error", "error": str(e)}
             return {"ran": True, "action": "preview", "used_gb": round(used_gb, 1), "eligible": stale}
 
@@ -276,8 +362,8 @@ def run_check(manual=False):
             log(f"ERROR during eviction: {e}")
             return {"ran": True, "action": "error", "error": str(e)}
 
-        final_used = disk_used_bytes(cfg["storage_path"]) / 1024**3
-        if over_limit(cfg) and all_evicted and evictions_left <= 0:
+        final_used = disk_used_bytes(cfg) / 1024**3
+        if over_limit(cfg) and evictions_left <= 0:
             log(f"Hit max evictions per run ({cfg['max_evictions_per_run']}) while still over limits. Will continue next check.")
         elif over_limit(cfg) and all_evicted:
             log(f"Still over limits after evicting all eligible stale media ({final_used:.1f}GB used).")
@@ -296,15 +382,37 @@ def background_loop():
         time.sleep(max(cfg["check_interval_minutes"], 5) * 60)
 
 
+_bg_thread_started = False
+
+
+def ensure_background_thread():
+    global _bg_thread_started
+    if not _bg_thread_started:
+        _bg_thread_started = True
+        t = threading.Thread(target=background_loop, daemon=True)
+        t.start()
+
+
+ensure_background_thread()
+
+
+# ---------------------------------------------------------------- routes --
+
+@app.route("/healthz")
+def healthz():
+    return jsonify({"status": "ok", "version": VERSION})
+
+
 @app.route("/")
+@require_auth
 def dashboard():
     cfg = load_config()
     history = load_history()
     configured = bool(cfg["plex_token"] and cfg["radarr_api_key"])
     disk_info = None
-    if os.path.exists(cfg["storage_path"]):
-        used = disk_used_bytes(cfg["storage_path"])
-        total = disk_total_bytes(cfg["storage_path"])
+    if paths_exist(cfg):
+        used = disk_used_bytes(cfg)
+        total = disk_total_bytes(cfg)
         disk_info = {
             "used_gb": round(used / 1024**3, 1),
             "total_gb": round(total / 1024**3, 1),
@@ -316,15 +424,18 @@ def dashboard():
         }
     return render_template("dashboard.html", cfg=cfg, history=history[:15],
                             configured=configured, disk_info=disk_info,
-                            total_freed_gb=total_freed_gb())
+                            total_freed_gb=total_freed_gb(), last_check=_state["last_check"],
+                            version=VERSION)
 
 
 @app.route("/history")
+@require_auth
 def history_page():
     return render_template("history.html", history=load_history(), total_freed_gb=total_freed_gb())
 
 
 @app.route("/settings", methods=["GET", "POST"])
+@require_auth
 def settings():
     if request.method == "POST":
         cfg = load_config()
@@ -333,30 +444,39 @@ def settings():
             cfg[field] = request.form.get(field, cfg[field]).strip()
         for field in ["disk_threshold_gb", "min_free_gb", "stale_days", "check_interval_minutes",
                       "max_evictions_per_run", "tv_stale_days"]:
-            cfg[field] = int(request.form.get(field, cfg[field]))
+            cfg[field] = max(0, int(request.form.get(field, cfg[field]) or 0))
         cfg["dry_run"] = "dry_run" in request.form
         cfg["enabled"] = "enabled" in request.form
         cfg["tv_enabled"] = "tv_enabled" in request.form
+
+        new_password = request.form.get("admin_password", "").strip()
+        if new_password:
+            cfg["admin_password_hash"] = generate_password_hash(new_password)
+        elif "clear_password" in request.form:
+            cfg["admin_password_hash"] = ""
+
         save_config(cfg)
         return redirect(url_for("settings", saved=1))
     cfg = load_config()
-    return render_template("settings.html", cfg=cfg, saved=request.args.get("saved"))
+    return render_template("settings.html", cfg=cfg, saved=request.args.get("saved"),
+                            auth_enabled=bool(cfg.get("admin_password_hash")))
 
 
 @app.route("/run-now", methods=["POST"])
+@require_auth
 def run_now():
     result = run_check(manual=True)
     return jsonify(result)
 
 
 @app.route("/api/status")
+@require_auth
 def api_status():
     cfg = load_config()
-    used = disk_used_bytes(cfg["storage_path"]) if os.path.exists(cfg["storage_path"]) else 0
-    return jsonify({"used_gb": round(used / 1024**3, 1), "threshold_gb": cfg["disk_threshold_gb"]})
+    used = disk_used_bytes(cfg) if paths_exist(cfg) else 0
+    return jsonify({"used_gb": round(used / 1024**3, 1), "threshold_gb": cfg["disk_threshold_gb"],
+                     "last_check": _state["last_check"]})
 
 
 if __name__ == "__main__":
-    t = threading.Thread(target=background_loop, daemon=True)
-    t.start()
     app.run(host="0.0.0.0", port=8585)

@@ -42,6 +42,7 @@
     <tr><td>Dry run</td><td>{{ "ON — logging only, nothing deleted" if cfg.dry_run else "off" }}</td></tr>
     <tr><td>Enabled</td><td>{{ "yes" if cfg.enabled else "no (paused)" }}</td></tr>
     <tr><td>Total freed so far</td><td>{{ total_freed_gb }} GB</td></tr>
+    <tr><td>Last check</td><td>{{ last_check if last_check else "not yet run" }}</td></tr>
   </table>
 </div>
 
