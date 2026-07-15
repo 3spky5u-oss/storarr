@@ -1,0 +1,33 @@
+# Storarr — disk-pressure-aware library rollover for Radarr/Sonarr + Plex.
+#
+# Sits quietly until your media drive crosses a threshold you set (either
+# "used space >= X" or "free space <= X"), then evicts the oldest-watched,
+# stale-enough movies (and optionally shows) to bring it back under the line.
+# Fully removes them from Radarr/Sonarr too, so re-requesting later in
+# Overseerr/Jellyseerr looks like a brand new request, not a re-add.
+#
+# Usage:
+#   1. docker build -t storarr:latest .
+#   2. Adjust the volume mount below so /data-storage points at the SAME
+#      host path your Radarr/Sonarr containers use for the media library
+#      (read-only is fine, Storarr only needs to measure usage there —
+#      actual deletions go through the Radarr/Sonarr APIs, not the filesystem).
+#   3. docker compose up -d
+#   4. Open http://<host>:8585/settings and fill in your Plex token,
+#      Radarr/Sonarr URLs + API keys, and your thresholds.
+#
+# Note: if your Plex container uses network_mode: host, other containers
+# can't reach it by container name — use the host's LAN IP instead
+# (e.g. http://192.168.1.50:32400).
+
+services:
+  storarr:
+    build: .
+    image: storarr:latest
+    container_name: storarr
+    restart: unless-stopped
+    ports:
+      - "8585:8585"
+    volumes:
+      - ./data:/data
+      - /path/to/your/media:/data-storage:ro

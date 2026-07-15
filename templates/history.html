@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Total space freed: {{ total_freed_gb }} GB</h2>
+</div>
+<div class="card">
+  <h2>Full history</h2>
+  {% if history %}
+  <table>
+    <tr><th>Time</th><th>Title</th><th>Type</th><th>Watched</th><th>Size</th><th>Mode</th></tr>
+    {% for h in history %}
+    <tr>
+      <td>{{ h.time }}</td>
+      <td>{{ h.title }}</td>
+      <td>{{ h.kind or "movie" }}</td>
+      <td>{{ h.watched_days_ago }}d ago</td>
+      <td>{{ h.size_gb }} GB</td>
+      <td>{{ "dry-run" if h.dry_run else "deleted" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">Nothing evicted yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

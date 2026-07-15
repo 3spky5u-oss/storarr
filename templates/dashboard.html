@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% if not configured %}
+<div class="card warn">
+  <strong>Not configured yet.</strong> Head to <a href="/settings">Settings</a> and add your Plex token + Radarr API key.
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Storage</h2>
+  {% if disk_info %}
+  <div class="bar">
+    <div class="bar-fill {{ 'over' if disk_info.over_threshold else '' }}" style="width: {{ disk_info.pct }}%"></div>
+    <div class="bar-threshold" style="left: {{ (disk_info.threshold_gb / disk_info.total_gb * 100) if disk_info.total_gb else 0 }}%"></div>
+  </div>
+  <p>{{ disk_info.used_gb }} GB used / {{ disk_info.total_gb }} GB total ({{ disk_info.pct }}%) &mdash; {{ disk_info.free_gb }} GB free</p>
+  <p class="muted">Roll-off trigger: used &ge; {{ disk_info.threshold_gb }} GB, or free &le; {{ disk_info.min_free_gb }} GB</p>
+  {% if disk_info.over_threshold %}
+    <p class="status over">Over limit — rollover active</p>
+  {% else %}
+    <p class="status ok">Within limits — nothing happening</p>
+  {% endif %}
+  {% else %}
+  <p>Storage path not found: {{ cfg.storage_path }}</p>
+  {% endif %}
+
+  <form id="run-form">
+    <button type="submit">Run check now</button>
+  </form>
+  <pre id="run-result"></pre>
+</div>
+
+<div class="card">
+  <h2>Config summary</h2>
+  <table class="kv">
+    <tr><td>Stale threshold</td><td>{{ cfg.stale_days }} days since last watched</td></tr>
+    <tr><td>Check interval</td><td>every {{ cfg.check_interval_minutes }} min</td></tr>
+    <tr><td>Max evictions per check</td><td>{{ cfg.max_evictions_per_run }}</td></tr>
+    <tr><td>Keep tag</td><td>{{ cfg.keep_tag if cfg.keep_tag else "(none set)" }}</td></tr>
+    <tr><td>TV shows</td><td>{{ "enabled, " ~ cfg.tv_stale_days ~ "d" if cfg.tv_enabled else "off (kept forever)" }}</td></tr>
+    <tr><td>Dry run</td><td>{{ "ON — logging only, nothing deleted" if cfg.dry_run else "off" }}</td></tr>
+    <tr><td>Enabled</td><td>{{ "yes" if cfg.enabled else "no (paused)" }}</td></tr>
+    <tr><td>Total freed so far</td><td>{{ total_freed_gb }} GB</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Recent activity <a href="/history" class="muted" style="font-size:0.8rem; font-weight:normal;">(full history &rarr;)</a></h2>
+  {% if history %}
+  <table>
+    <tr><th>Time</th><th>Title</th><th>Watched</th><th>Size</th><th>Mode</th></tr>
+    {% for h in history %}
+    <tr>
+      <td>{{ h.time }}</td>
+      <td>{{ h.title }}</td>
+      <td>{{ h.watched_days_ago }}d ago</td>
+      <td>{{ h.size_gb }} GB</td>
+      <td>{{ "dry-run" if h.dry_run else "deleted" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">Nothing evicted yet.</p>
+  {% endif %}
+</div>
+
+<script>
+document.getElementById('run-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const out = document.getElementById('run-result');
+  out.textContent = 'Running...';
+  const resp = await fetch('/run-now', { method: 'POST' });
+  const data = await resp.json();
+  out.textContent = JSON.stringify(data, null, 2);
+  setTimeout(() => location.reload(), 1500);
+});
+</script>
+{% endblock %}

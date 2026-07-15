@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% if saved %}<div class="card ok">Saved.</div>{% endif %}
+
+<form method="post" class="card">
+  <h2>Plex</h2>
+  <label>Plex URL <input type="text" name="plex_url" value="{{ cfg.plex_url }}"></label>
+  <label>Plex Token <input type="text" name="plex_token" value="{{ cfg.plex_token }}" placeholder="X-Plex-Token"></label>
+  <label>Movies Library Key <input type="text" name="movies_library_key" value="{{ cfg.movies_library_key }}"></label>
+
+  <h2>Radarr</h2>
+  <label>Radarr URL <input type="text" name="radarr_url" value="{{ cfg.radarr_url }}"></label>
+  <label>Radarr API Key <input type="text" name="radarr_api_key" value="{{ cfg.radarr_api_key }}"></label>
+
+  <h2>Storage</h2>
+  <label>Storage path (as seen inside this container) <input type="text" name="storage_path" value="{{ cfg.storage_path }}"></label>
+  <label>Roll-off trigger — disk used (GB) <input type="number" name="disk_threshold_gb" value="{{ cfg.disk_threshold_gb }}"></label>
+  <label>Minimum free space to always keep (GB) — rollover also triggers if free space drops below this
+    <input type="number" name="min_free_gb" value="{{ cfg.min_free_gb }}"></label>
+  <label>Stale after (days since last watched) <input type="number" name="stale_days" value="{{ cfg.stale_days }}"></label>
+  <label>Check interval (minutes) <input type="number" name="check_interval_minutes" value="{{ cfg.check_interval_minutes }}"></label>
+  <label>Max evictions per check (safety cap) <input type="number" name="max_evictions_per_run" value="{{ cfg.max_evictions_per_run }}"></label>
+  <label>Keep tag — Radarr/Sonarr tag that's never evicted, regardless of staleness (optional)
+    <input type="text" name="keep_tag" value="{{ cfg.keep_tag }}" placeholder="e.g. keep"></label>
+
+  <h2>Mode</h2>
+  <label class="checkbox"><input type="checkbox" name="dry_run" {{ "checked" if cfg.dry_run }}> Dry run (log what would be evicted, delete nothing)</label>
+  <label class="checkbox"><input type="checkbox" name="enabled" {{ "checked" if cfg.enabled }}> Enabled (background checks run automatically)</label>
+
+  <h2>TV Shows (optional — off by default, most people keep shows forever)</h2>
+  <label class="checkbox"><input type="checkbox" name="tv_enabled" {{ "checked" if cfg.tv_enabled }}> Also roll off stale shows</label>
+  <label>Shows Library Key <input type="text" name="shows_library_key" value="{{ cfg.shows_library_key }}"></label>
+  <label>Sonarr URL <input type="text" name="sonarr_url" value="{{ cfg.sonarr_url }}"></label>
+  <label>Sonarr API Key <input type="text" name="sonarr_api_key" value="{{ cfg.sonarr_api_key }}"></label>
+  <label>Stale after (days since last episode watched) <input type="number" name="tv_stale_days" value="{{ cfg.tv_stale_days }}"></label>
+
+  <button type="submit">Save</button>
+</form>
+{% endblock %}
