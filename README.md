@@ -19,15 +19,17 @@ to refill, so there's no reason to hoard.
   it stops the moment you're clear.
 - Deletes the full Radarr record, not just the file, so re-requesting the
   same movie later in Overseerr/Jellyseerr looks like a brand new request.
-- Never touches TV shows, unwatched movies, recently-watched movies, or
-  anything tagged with a "keep tag" you set — regardless of how full the
-  drive gets.
-- TV show rollover exists but is off by default.
+- Never touches unwatched movies/shows, recently-watched ones, or anything
+  tagged with a "keep tag" you set — regardless of how full the drive gets.
+- **TV shows via Sonarr are supported the same way as movies via Radarr**,
+  with their own stale-days window and their own keep tag — just off by
+  default, since most people want shows kept forever and movies rotating.
+  Flip on "Also roll off stale shows" in Settings if that's not you.
 
 ## Install
 
 ```bash
-git clone <this-repo-url> storarr
+git clone https://github.com/3spky5u-oss/storarr.git
 cd storarr
 docker compose up -d
 ```
@@ -71,12 +73,14 @@ reach it by name — use the host's LAN IP in the Plex URL setting instead
 |---|---|
 | Roll-off trigger (used GB) | Start evicting once used space reaches this |
 | Minimum free space (GB) | Also start evicting if free space drops to this |
-| Stale after (days) | How long unwatched-since-last-view before eligible |
+| Stale after (days, movies) | How long unwatched-since-last-view before a movie is eligible |
 | Check interval (minutes) | How often the background loop checks |
-| Max evictions per check | Safety cap per run |
-| Keep tag | A Radarr tag that's never evicted |
+| Max evictions per check | Safety cap per run, shared across movies+shows |
+| Keep tag (movies) | A Radarr tag that's never evicted |
 | Dry run | Log only, delete nothing |
-| TV shows | Off by default; opt in for show rollover too |
+| TV shows | Off by default; opt in for independent show rollover |
+| Stale after (days, shows) | Same idea, separate window for shows once enabled |
+| Keep tag (shows) | A Sonarr tag that's never evicted — independent of the movie keep tag |
 | Admin password | Optional — set one if this is reachable beyond your LAN |
 
 ## Security note

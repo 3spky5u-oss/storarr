@@ -41,6 +41,7 @@ DEFAULT_CONFIG = {
     "sonarr_api_key": "",
     "shows_library_key": "2",
     "tv_stale_days": 365,
+    "tv_keep_tag": "",
     # optional HTTP basic auth -- off unless a password has been set
     "admin_password_hash": "",
 }
@@ -263,10 +264,12 @@ def evict_stale(cfg, kind, evictions_left):
         library_key = cfg["movies_library_key"]
         stale_days = cfg["stale_days"]
         arr_url, arr_key, endpoint = cfg["radarr_url"], cfg["radarr_api_key"], "movie"
+        keep_tag = cfg["keep_tag"]
     else:
         library_key = cfg["shows_library_key"]
         stale_days = cfg["tv_stale_days"]
         arr_url, arr_key, endpoint = cfg["sonarr_url"], cfg["sonarr_api_key"], "series"
+        keep_tag = cfg["tv_keep_tag"]
 
     stale = get_stale_plex_items(cfg, library_key, stale_days, kind)
     if not stale:
@@ -302,8 +305,8 @@ def evict_stale(cfg, kind, evictions_left):
             log(f"WARNING: no {endpoint} match for '{candidate['title']}' (checked ID and path/title)")
             continue
 
-        if has_keep_tag(item, all_tags, cfg["keep_tag"]):
-            log(f"Skipping '{candidate['title']}' — has keep tag '{cfg['keep_tag']}'")
+        if has_keep_tag(item, all_tags, keep_tag):
+            log(f"Skipping '{candidate['title']}' — has keep tag '{keep_tag}'")
             continue
 
         watched_days_ago = int((time.time() - candidate["lastViewedAt"]) / 86400)
@@ -440,7 +443,8 @@ def settings():
     if request.method == "POST":
         cfg = load_config()
         for field in ["plex_url", "plex_token", "movies_library_key", "radarr_url", "radarr_api_key",
-                      "storage_path", "keep_tag", "sonarr_url", "sonarr_api_key", "shows_library_key"]:
+                      "storage_path", "keep_tag", "sonarr_url", "sonarr_api_key", "shows_library_key",
+                      "tv_keep_tag"]:
             cfg[field] = request.form.get(field, cfg[field]).strip()
         for field in ["disk_threshold_gb", "min_free_gb", "stale_days", "check_interval_minutes",
                       "max_evictions_per_run", "tv_stale_days"]:

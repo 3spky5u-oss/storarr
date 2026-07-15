@@ -32,7 +32,7 @@
   <label>Stale after (days since last watched) <input type="number" name="stale_days" value="{{ cfg.stale_days }}"></label>
   <label>Check interval (minutes) <input type="number" name="check_interval_minutes" value="{{ cfg.check_interval_minutes }}"></label>
   <label>Max evictions per check (safety cap) <input type="number" name="max_evictions_per_run" value="{{ cfg.max_evictions_per_run }}"></label>
-  <label>Keep tag — Radarr/Sonarr tag that's never evicted, regardless of staleness (optional)
+  <label>Keep tag (movies) — Radarr tag that's never evicted, regardless of staleness (optional)
     <input type="text" name="keep_tag" value="{{ cfg.keep_tag }}" placeholder="e.g. keep"></label>
 
   <h2>Mode</h2>
@@ -50,6 +50,8 @@
     </span>
   </label>
   <label>Stale after (days since last episode watched) <input type="number" name="tv_stale_days" value="{{ cfg.tv_stale_days }}"></label>
+  <label>Keep tag (shows) — Sonarr tag that's never evicted, independent of the movie keep tag (optional)
+    <input type="text" name="tv_keep_tag" value="{{ cfg.tv_keep_tag }}" placeholder="e.g. keep"></label>
 
   <h2>Security</h2>
   <p class="muted">

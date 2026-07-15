@@ -37,7 +37,8 @@
     <tr><td>Stale threshold</td><td>{{ cfg.stale_days }} days since last watched</td></tr>
     <tr><td>Check interval</td><td>every {{ cfg.check_interval_minutes }} min</td></tr>
     <tr><td>Max evictions per check</td><td>{{ cfg.max_evictions_per_run }}</td></tr>
-    <tr><td>Keep tag</td><td>{{ cfg.keep_tag if cfg.keep_tag else "(none set)" }}</td></tr>
+    <tr><td>Keep tag (movies)</td><td>{{ cfg.keep_tag if cfg.keep_tag else "(none set)" }}</td></tr>
+    {% if cfg.tv_enabled %}<tr><td>Keep tag (shows)</td><td>{{ cfg.tv_keep_tag if cfg.tv_keep_tag else "(none set)" }}</td></tr>{% endif %}
     <tr><td>TV shows</td><td>{{ "enabled, " ~ cfg.tv_stale_days ~ "d" if cfg.tv_enabled else "off (kept forever)" }}</td></tr>
     <tr><td>Dry run</td><td>{{ "ON — logging only, nothing deleted" if cfg.dry_run else "off" }}</td></tr>
     <tr><td>Enabled</td><td>{{ "yes" if cfg.enabled else "no (paused)" }}</td></tr>
